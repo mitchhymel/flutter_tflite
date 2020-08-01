@@ -28,6 +28,7 @@ import org.tensorflow.lite.Tensor;
 import org.tensorflow.lite.support.image.ImageProcessor;
 import org.tensorflow.lite.support.image.TensorImage;
 import org.tensorflow.lite.support.image.ops.ResizeOp;
+import org.tensorflow.lite.support.image.ops.ResizeWithCropOrPadOp;
 
 
 import org.tensorflow.lite.gpu.GpuDelegate;
@@ -562,11 +563,46 @@ public class TflitePlugin implements MethodCallHandler {
 
   void detectObjectOnImageGeneric(HashMap args, Result result) throws IOException {
     String path = args.get("path").toString();
+
+    // float mean = 127.5f;
+    // float std = 127.5f;
+    // InputStream inputStream = new FileInputStream(path.replace("file://", ""));
+    // Bitmap bitmapRaw = BitmapFactory.decodeStream(inputStream);
+
+    // Tensor tensor = tfLite.getInputTensor(0);
+    // int[] shape = tensor.shape();
+    // int inputSize = 416;
+    // int inputChannels = shape[3];
+    // int bytePerChannel = 4;
+    // ByteBuffer imgData = ByteBuffer.allocateDirect(1 * inputSize * inputSize * inputChannels * bytePerChannel);
+    // imgData.order(ByteOrder.nativeOrder());
+
+    // Bitmap bitmap = bitmapRaw;
+    // Matrix matrix = getTransformationMatrix(bitmapRaw.getWidth(), bitmapRaw.getHeight(),
+    //       inputSize, inputSize, true);
+    // bitmap = Bitmap.createBitmap(inputSize, inputSize, Bitmap.Config.ARGB_8888);
+    // final Canvas canvas = new Canvas(bitmap);
+    // canvas.drawBitmap(bitmapRaw, matrix, null);
+
+    // for (int i = 0; i < inputSize; ++i) {
+    //   for (int j = 0; j < inputSize; ++j) {
+    //     int pixelValue = bitmap.getPixel(j, i);
+    //     imgData.putFloat((((pixelValue >> 16) & 0xFF) - mean) / std);
+    //     imgData.putFloat((((pixelValue >> 8) & 0xFF) - mean) / std);
+    //     imgData.putFloat(((pixelValue & 0xFF) - mean) / std);
+    //   }
+    // }
+    // Object[] inputs = {imgData};
+    // new RunForMultipleInputs(args, result, inputs).executeTfliteTask();
+
     ByteBuffer imgData = feedInputTensorImage(path, 127.5f, 127.5f); // todo: fix hardcoded std and mean
     ImageProcessor imageProcessor = new ImageProcessor.Builder()
-            .add(new ResizeOp(416, 416, ResizeOp.ResizeMethod.BILINEAR))
+            .add(new ResizeWithCropOrPadOp(416, 416))
+            //.add(new ResizeOp(416, 416, ResizeOp.ResizeMethod.BILINEAR,  ))
             .build();
     TensorImage tImage = new TensorImage(DataType.FLOAT32);
+
+
     Bitmap bitmap = BitmapFactory.decodeFile(path);
     tImage.load(bitmap);
     tImage = imageProcessor.process(tImage);
