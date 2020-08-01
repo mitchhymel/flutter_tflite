@@ -25,6 +25,10 @@ import io.flutter.plugin.common.PluginRegistry.Registrar;
 import org.tensorflow.lite.DataType;
 import org.tensorflow.lite.Interpreter;
 import org.tensorflow.lite.Tensor;
+import org.tensorflow.lite.support.image.ImageProcessor;
+import org.tensorflow.lite.support.image.TensorImage;
+import org.tensorflow.lite.support.image.ops.ResizeOp;
+
 
 import org.tensorflow.lite.gpu.GpuDelegate;
 
@@ -559,7 +563,14 @@ public class TflitePlugin implements MethodCallHandler {
   void detectObjectOnImageGeneric(HashMap args, Result result) throws IOException {
     String path = args.get("path").toString();
     ByteBuffer imgData = feedInputTensorImage(path, 127.5f, 127.5f); // todo: fix hardcoded std and mean
-    Object[] inputs = {imgData};
+    ImageProcessor imageProcessor = new ImageProcessor.Builder()
+            .add(new ResizeOp(416, 416, ResizeOp.ResizeMethod.BILINEAR))
+            .build();
+    TensorImage tImage = new TensorImage(DataType.FLOAT32);
+    Bitmap bitmap = BitmapFactory.decodeFile(path);
+    tImage.load(bitmap);
+    tImage = imageProcessor.process(tImage);
+    Object[] inputs = {tImage.getBuffer()};
     new RunForMultipleInputs(args, result, inputs).executeTfliteTask();
   }
 
@@ -722,14 +733,14 @@ public class TflitePlugin implements MethodCallHandler {
     ) {
       super(args, result);
       this.input = input;
+    }
+
+    protected void runTflite() {
       this.output = new HashMap<Integer, Object>();
       for (int i = 0; i < tfLite.getOutputTensorCount(); i++) {
         Tensor t = tfLite.getOutputTensor(i);
         this.output.put(i, Array.newInstance(float.class, t.shape()));
       }
-    }
-
-    protected void runTflite() {
       tfLite.runForMultipleInputsOutputs(this.input, this.output);
     }
 
