@@ -123,6 +123,12 @@ public class TflitePlugin implements MethodCallHandler {
       } catch (Exception e) {
         result.error("Failed to run model", e.getMessage(), e);
       }
+    } else if (call.method.equals("detectObjectOnImageGeneric")) {
+      try {
+        detectObjectOnImageGeneric((HashMap) call.arguments, result);
+      } catch (Exception e) {
+        result.error("Failed to run model", e.getMessage(), e);
+      }
     } else if (call.method.equals("detectObjectOnBinary")) {
       try {
         detectObjectOnBinary((HashMap) call.arguments, result);
@@ -550,6 +556,13 @@ public class TflitePlugin implements MethodCallHandler {
     }
   }
 
+  void detectObjectOnImageGeneric(HashMap args, Result result) throws IOException {
+    String path = args.get("path").toString();
+    ByteBuffer imgData = feedInputTensorImage(path, 127.5f, 127.5f); // todo: fix hardcoded std and mean
+    Object[] inputs = {imgData};
+    new RunForMultipleInputs(args, result, inputs).executeTfliteTask();
+  }
+
   void detectObjectOnImage(HashMap args, Result result) throws IOException {
     String path = args.get("path").toString();
     String model = args.get("model").toString();
@@ -568,8 +581,6 @@ public class TflitePlugin implements MethodCallHandler {
 
     if (model.equals("SSDMobileNet")) {
       new RunSSDMobileNet(args, imgData, NUM_RESULTS_PER_CLASS, THRESHOLD, result).executeTfliteTask();
-    } else if (model.equals("YOLOv3")) {
-      new RunYOLOv3(args, imgData, BLOCK_SIZE, NUM_BOXES_PER_BLOCK, ANCHORS, THRESHOLD, NUM_RESULTS_PER_CLASS, result).executeTfliteTask();
     } else {
       new RunYOLO(args, imgData, BLOCK_SIZE, NUM_BOXES_PER_BLOCK, ANCHORS, THRESHOLD, NUM_RESULTS_PER_CLASS, result).executeTfliteTask();
     }
@@ -699,133 +710,38 @@ public class TflitePlugin implements MethodCallHandler {
     }
   }
 
+  private class RunForMultipleInputs extends TfliteTask {
 
-  private class RunYOLOv3 extends TfliteTask {
-    ByteBuffer imgData;
-    int blockSize;
-    int numBoxesPerBlock;
-    List<Double> anchors;
-    float threshold;
-    int numResultsPerClass;
-    long startTime;
-    int gridSize;
-    int numClasses;
-    float[][][][][] output;
+    Object[] input;
+    Map<Integer, Object> output;
 
-    RunYOLOv3(HashMap args,
-            ByteBuffer imgData,
-            int blockSize,
-            int numBoxesPerBlock,
-            List<Double> anchors,
-            float threshold,
-            int numResultsPerClass,
-            Result result) {
+    RunForMultipleInputs(
+      HashMap args,
+      Result result,
+      Object[] input
+    ) {
       super(args, result);
-      this.imgData = imgData;
-      this.blockSize = blockSize;
-      this.numBoxesPerBlock = numBoxesPerBlock;
-      this.anchors = anchors;
-      this.threshold = threshold;
-      this.numResultsPerClass = numResultsPerClass;
-      this.startTime = SystemClock.uptimeMillis();
-
-      Tensor tensor = tfLite.getInputTensor(0);
-      inputSize = tensor.shape()[1];
-
-      this.gridSize = inputSize / blockSize;
-      this.numClasses = labels.size();
-
-      this.output = new float[1][gridSize][gridSize][3][5+numClasses];
+      this.input = input;
+      this.output = new HashMap<Integer, Object>();
+      for (int i = 0; i < tfLite.getOutputTensorCount(); i++) {
+        Tensor t = tfLite.getOutputTensor(i);
+        this.output.put(i, Array.newInstance(float.class, t.shape()));
+      }
     }
 
     protected void runTflite() {
-      tfLite.run(imgData, this.output);
+      tfLite.runForMultipleInputsOutputs(this.input, this.output);
     }
 
     protected void onRunTfliteDone() {
       List<String> res = new ArrayList();
-      res.add(Arrays.deepToString(this.output));
+      for (int i = 0; i < tfLite.getOutputTensorCount(); i++) {
+        String pass = Arrays.deepToString((float[][][][][])this.output.get(i));
+        //Log.v("PASS", pass);
+        res.add(pass);
+      }
+
       result.success(res); 
-      
-      // PriorityQueue<Map<String, Object>> pq =
-      //     new PriorityQueue<>(
-      //         1,
-      //         new Comparator<Map<String, Object>>() {
-      //           @Override
-      //           public int compare(Map<String, Object> lhs, Map<String, Object> rhs) {
-      //             return Float.compare((float) rhs.get("confidenceInClass"), (float) lhs.get("confidenceInClass"));
-      //           }
-      //         });
-
-
-      // // the 6 is x, y, width, height, confidence, class probability1, class prob 2, ...etc.
-      // for (int y = 0; y < gridSize; ++y) {
-      //   for (int x = 0; x < gridSize; ++x) {
-      //     for (int p = 0; p < 3; ++p) {
-      //       final float[] pass = output[0][y][x][p];
-      //       final float confidence = pass[4];
-
-      //       final int offset = 5; // start of class probabilites
-      //       final float[] classes = new float[numClasses];
-      //       for (int c = 0; c < numClasses; ++c) {
-      //         classes[c] = pass[offset+c];
-      //       }
-      //       softmax(classes);
-
-      //       int detectedClass = -1;
-      //       float maxClass = 0;
-      //       for (int c = 0; c < numClasses; ++c) {
-      //         if (classes[c] > maxClass) {
-      //           detectedClass = c;
-      //           maxClass = classes[c];
-      //         }
-      //       }
-
-      //       final float confidenceInClass = maxClass * confidence;
-      //       if (confidenceInClass > threshold) {
-      //         final float xPos = x + sigmoid(pass[0]);
-      //         final float yPos = x + sigmoid(pass[1]);
-      //         final float w = (float) (Math.exp(pass[2] * anchors.get(0))); //todo use anchors?
-      //         final float h = (float) (Math.exp(pass[3] * anchors.get(0))); //todo use anchors?
-      //         final float xmin = Math.max(0, (xPos - w/2) / inputSize);
-      //         final float ymin = Math.max(0, (yPos - h/2) / inputSize);
-
-      //         Map<String, Object> rect = new HashMap<>();
-      //         rect.put("x", xmin);
-      //         rect.put("y", ymin);
-      //         rect.put("w", Math.min(1 - xmin, w / inputSize));
-      //         rect.put("h", Math.min(1 - ymin, h / inputSize));
-      //         Map<String, Object> ret = new HashMap<>();
-      //         ret.put("rect", rect);
-      //         ret.put("confidenceInClass", confidenceInClass);
-      //         ret.put("detectedClass", labels.get(detectedClass));
-
-      //         pq.add(ret);
-      //       }
-      //     }
-      //   }
-      // }
-
-      // Map<String, Integer> counters = new HashMap<>();
-      // List<Map<String, Object>> results = new ArrayList<>();
-
-      // for (int i = 0; i < pq.size(); ++i) {
-      //   Map<String, Object> ret = pq.poll();
-      //   String detectedClass = ret.get("detectedClass").toString();
-
-      //   if (counters.get(detectedClass) == null) {
-      //     counters.put(detectedClass, 1);
-      //   } else {
-      //     int count = counters.get(detectedClass);
-      //     if (count >= numResultsPerClass) {
-      //       continue;
-      //     } else {
-      //       counters.put(detectedClass, count + 1);
-      //     }
-      //   }
-      //   results.add(ret);
-      // }
-      // result.success(results);
     }
   }
 

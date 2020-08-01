@@ -99,6 +99,17 @@ class Tflite {
     9.77052,
     9.16828
   ];
+  
+  static Future<List> detectObjectOnImageGeneric({
+    @required String path,
+  }) async {
+    return await _channel.invokeMethod(
+      'detectObjectOnImageGeneric',
+      {
+        "path": path,
+      },
+    );
+  }
 
   static Future<List> detectObjectOnImage({
     @required String path,
