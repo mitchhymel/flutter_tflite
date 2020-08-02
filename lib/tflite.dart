@@ -107,6 +107,7 @@ class Tflite {
       'detectObjectOnImageGeneric',
       {
         "path": path,
+        "asynch": true,
       },
     );
   }
