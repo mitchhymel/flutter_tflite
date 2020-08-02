@@ -102,12 +102,14 @@ class Tflite {
   
   static Future<List> detectObjectOnImageGeneric({
     @required String path,
+    @required int inputImageSize,
   }) async {
     return await _channel.invokeMethod(
       'detectObjectOnImageGeneric',
       {
         "path": path,
         "asynch": true,
+        "inputImageSize": inputImageSize,
       },
     );
   }
