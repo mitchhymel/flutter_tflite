@@ -103,6 +103,8 @@ class Tflite {
   static Future<List> detectObjectOnImageGeneric({
     @required String path,
     @required int inputImageSize,
+    double scoreThreshold=.7,
+    double overlapThreshold=.45,
   }) async {
     return await _channel.invokeMethod(
       'detectObjectOnImageGeneric',
@@ -110,6 +112,8 @@ class Tflite {
         "path": path,
         "asynch": true,
         "inputImageSize": inputImageSize,
+        "scoreThreshold": scoreThreshold,
+        "overlapThreshold": overlapThreshold,
       },
     );
   }

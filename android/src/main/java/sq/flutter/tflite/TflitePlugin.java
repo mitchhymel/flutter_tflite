@@ -15,6 +15,7 @@ import android.renderscript.RenderScript;
 import android.renderscript.ScriptIntrinsicYuvToRGB;
 import android.renderscript.Type;
 import android.util.Log;
+import android.os.Environment;
 
 import io.flutter.plugin.common.MethodCall;
 import io.flutter.plugin.common.MethodChannel;
@@ -30,7 +31,9 @@ import org.tensorflow.lite.support.image.TensorImage;
 import org.tensorflow.lite.support.image.ops.ResizeOp;
 import org.tensorflow.lite.support.image.ops.ResizeWithCropOrPadOp;
 import org.tensorflow.lite.support.image.ops.ResizeOp.ResizeMethod;
+import org.tensorflow.lite.support.image.ops.Rot90Op;
 import org.tensorflow.lite.support.common.ops.NormalizeOp;
+import com.google.gson.Gson;
 
 
 import org.tensorflow.lite.gpu.GpuDelegate;
@@ -50,12 +53,15 @@ import java.nio.channels.FileChannel;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Vector;
 import java.lang.reflect.Array;
+import java.io.OutputStream;
 
 
 public class TflitePlugin implements MethodCallHandler {
@@ -563,26 +569,6 @@ public class TflitePlugin implements MethodCallHandler {
     }
   }
 
-  void detectObjectOnImageGeneric(HashMap args, Result result) throws IOException {
-    String path = args.get("path").toString();
-    int inputImageSize = (int) (args.get("inputImageSize"));
-    Bitmap bitmap = BitmapFactory.decodeFile(path);
-
-    int cropSize = Math.min(bitmap.getWidth(), bitmap.getHeight());
-    ImageProcessor imageProcessor = new ImageProcessor.Builder()
-            .add(new ResizeWithCropOrPadOp(inputImageSize, inputImageSize))
-            //.add(new ResizeWithCropOrPadOp(416,416))
-            //.add(new ResizeOp(1666, 1666, ResizeMethod.BILINEAR))
-            //.add(new NormalizeOp(0f, 1f))
-            .build();
-    TensorImage tImage = new TensorImage(DataType.FLOAT32);
-
-    tImage.load(bitmap);
-    tImage = imageProcessor.process(tImage);
-    Object[] inputs = {tImage.getBuffer()};
-    new RunForMultipleInputs(args, result, inputs).executeTfliteTask();
-  }
-
   void detectObjectOnImage(HashMap args, Result result) throws IOException {
     String path = args.get("path").toString();
     String model = args.get("model").toString();
@@ -730,10 +716,42 @@ public class TflitePlugin implements MethodCallHandler {
     }
   }
 
+  
+  void detectObjectOnImageGeneric(HashMap args, Result result) throws IOException {
+    String path = args.get("path").toString();
+    int inputImageSize = (int) (args.get("inputImageSize"));
+    Bitmap bitmap = BitmapFactory.decodeFile(path);
+    //Log.v("BITMAPDIMS", bitmap.getWidth() + "x" + bitmap.getHeight());
+    args.put("originalImageWidth", bitmap.getHeight());
+    args.put("originalImageHeight", bitmap.getWidth());
+
+    int cropSize = Math.min(bitmap.getWidth(), bitmap.getHeight());
+    ImageProcessor imageProcessor = new ImageProcessor.Builder()
+            .add(new Rot90Op(1))
+            .add(new ResizeWithCropOrPadOp(cropSize, cropSize))
+            .add(new ResizeOp(inputImageSize, inputImageSize, ResizeMethod.BILINEAR))
+            .add(new NormalizeOp(0f, 1f))
+            .build();
+    TensorImage tImage = new TensorImage(DataType.FLOAT32);
+
+    tImage.load(bitmap);
+    //Log.v("BEFORE", tImage.getWidth() + "x" + tImage.getHeight());
+    tImage = imageProcessor.process(tImage);
+    //Log.v("AFTER", tImage.getWidth() + "x" + tImage.getHeight());
+
+    Object[] inputs = {tImage.getBuffer()};
+    new RunForMultipleInputs(args, result, inputs).executeTfliteTask();
+  }
+
   private class RunForMultipleInputs extends TfliteTask {
 
     Object[] input;
     Map<Integer, Object> output;
+    double scoreThreshold;
+    double overlapThreshold;
+    int inputImageSize;
+    int originalImageWidth;
+    int originalImageHeight;
 
     RunForMultipleInputs(
       HashMap args,
@@ -742,6 +760,11 @@ public class TflitePlugin implements MethodCallHandler {
     ) {
       super(args, result);
       this.input = input;
+      this.scoreThreshold = (double) (args.get("scoreThreshold"));
+      this.overlapThreshold = (double) (args.get("overlapThreshold"));
+      this.inputImageSize = (int) (args.get("inputImageSize"));
+      this.originalImageWidth = (int) (args.get("originalImageWidth"));
+      this.originalImageHeight = (int) (args.get("originalImageHeight"));
     }
 
     protected void runTflite() {
@@ -755,14 +778,185 @@ public class TflitePlugin implements MethodCallHandler {
     }
 
     protected void onRunTfliteDone() {
+      List<ProcessedGuess> unraveled = this.unravelResults();
+
+      List<ProcessedGuess> nmsProcessed = this.runNMS(unraveled);
+     
       List<String> res = new ArrayList();
-      for (int i = 0; i < tfLite.getOutputTensorCount(); i++) {
-        String pass = Arrays.deepToString((Object[])this.output.get(i));
-        //Log.v("PASS", pass);
-        res.add(pass);
+      for (int i = 0; i < nmsProcessed.size(); i++) {
+        res.add(nmsProcessed.get(i).toString());
       }
 
-      result.success(res); 
+      result.success(res);
+    }
+
+    private List<ProcessedGuess> unravelResults() {
+      List<ProcessedGuess> unraveled = new ArrayList();
+      for (int tensorOutputIndex = 0; tensorOutputIndex < tfLite.getOutputTensorCount(); tensorOutputIndex++) {
+      Object[] imageResultsList = (Object[])output.get(tensorOutputIndex);
+      for (int imageResultsIndex = 0; imageResultsIndex < imageResultsList.length; imageResultsIndex++) {
+      Object[] xDimensionResultsList = (Object[])imageResultsList[imageResultsIndex];
+      for (int x = 0; x < xDimensionResultsList.length; x++) {
+      Object[] yDimensionResultsList = (Object[])xDimensionResultsList[x];
+      for (int y = 0; y < yDimensionResultsList.length; y++) {
+      Object[] passes = (Object[])yDimensionResultsList[y];
+      for (int pass = 0; pass < passes.length; pass++) {
+        BlockGuess block = new BlockGuess(passes[pass]);
+        int highestIndex = block.getIndexOfHighestScore();
+        double highestProbability = block.probs[highestIndex];
+        double highestScore = block.confidence * highestProbability;
+        if (highestScore > this.scoreThreshold) {
+          double xMin = block.xPos - .5*block.width;
+          double xMax = block.xPos + .5*block.width;
+          double yMin = block.yPos - .5*block.height;
+          double yMax = block.yPos + .5*block.height;
+
+          // Convert back to original image x,y
+          xMin = xMin * this.originalImageWidth/inputImageSize;
+          xMax = xMax * this.originalImageWidth/inputImageSize;
+          yMin = yMin * this.originalImageHeight/inputImageSize;
+          yMax = yMax * this.originalImageHeight/inputImageSize;
+
+          // eliminate mathematically invalid guesses
+          boolean valid = (
+            xMin < xMax &&
+            yMin < yMax &&
+            xMin > 0 &&
+            yMin > 0 &&
+            xMax < this.originalImageWidth &&
+            yMax < this.originalImageHeight
+          );
+
+          if (valid) {
+            ProcessedGuess guess = new ProcessedGuess();
+            guess.xMin = xMin;
+            guess.xMax = xMax;
+            guess.yMin = yMin;
+            guess.yMax = yMax;
+            guess.label = highestIndex;
+            guess.confidence = block.confidence;
+            guess.probability = highestProbability;
+            guess.score = guess.confidence * guess.probability;
+  
+            unraveled.add(guess);
+          }
+        }
+      }}}}}
+      return unraveled;
+    }
+
+    private List<ProcessedGuess> runNMS(List<ProcessedGuess> guesses) {
+
+      List<ProcessedGuess> bestGuesses = new ArrayList<ProcessedGuess>();
+      List<ProcessedGuess> copy = new ArrayList<ProcessedGuess>(guesses);
+      
+      copy.sort(null);
+
+      while (copy.size() > 0) {
+        ProcessedGuess bestGuess = copy.remove(0);
+        bestGuesses.add(bestGuess);
+
+        Iterator<ProcessedGuess> iter = copy.iterator();
+        while (iter.hasNext()) {
+          ProcessedGuess guess = iter.next();
+          if (bestGuess.calculateOverlap(guess) > overlapThreshold) {
+            iter.remove();
+          }
+        }
+      }
+
+      return bestGuesses;
+    }
+  }
+
+  private class ProcessedGuess implements Comparable<ProcessedGuess> {
+    public double xMin;
+    public double xMax;
+    public double yMin;
+    public double yMax;
+    public int label;
+    public double probability;
+    public double confidence;
+    public double score;
+
+    public double area() {
+      return (xMax - xMin) * (yMax - yMin);
+    }
+
+    public double calculateOverlap(ProcessedGuess other) {
+      double xMinInter = Math.max(this.xMin, other.xMin);
+      double xMaxInter = Math.min(this.xMax, other.xMax);
+      double yMinInter = Math.max(this.yMin, other.yMin);
+      double yMaxInter = Math.min(this.yMax, other.yMax);
+      double interArea = Math.max(0, (xMaxInter - xMinInter) * (yMaxInter - yMinInter));
+      double unionArea = this.area() + other.area() - interArea;
+      double iou = interArea / unionArea;
+      return iou;
+    }
+
+    public boolean equals(ProcessedGuess other) {
+      return this.label == other.label 
+        && this.score == other.score 
+        && this.xMin == other.xMin
+        && this.xMax == other.xMax
+        && this.yMin == other.yMin
+        && this.yMax == other.yMax;
+    }
+
+    @Override
+    public String toString() {
+      return new Gson().toJson(this);
+    }
+
+    /**
+     * Sorting in reverse order
+     */
+    @Override
+    public int compareTo(ProcessedGuess other) {
+      if (this.score < other.score) 
+        return 1;
+      else if (this.score > other.score)
+        return -1;
+      return 0;
+    }
+  }
+
+  private class BlockGuess {
+    public double xPos;
+    public double yPos;
+    public double width;
+    public double height;
+    public double confidence;
+    public double[] probs;
+    public int highestIndex;
+
+    BlockGuess(Object obj) {
+      float[] res = (float[]) obj;
+      this.xPos = res[0];
+      this.yPos = res[1];
+      this.width = res[2];
+      this.height = res[3];
+      this.confidence = res[4];
+      this.probs = new double[res.length-5];
+
+
+      double highest = 0;
+      for (int i = 0; i < probs.length; i++) {
+        this.probs[i] = res[i+5];
+        if (this.probs[i] > highest) {
+          highestIndex = i;
+          highest = this.probs[i];
+        }
+      }
+    }
+
+    public int getIndexOfHighestScore() {
+      return this.highestIndex;
+    }
+
+    @Override
+    public String toString() {
+      return new Gson().toJson(this);
     }
   }
 

@@ -36,5 +36,6 @@ android {
         compile 'org.tensorflow:tensorflow-lite:+'
         compile 'org.tensorflow:tensorflow-lite-gpu:+'
         compile 'org.tensorflow:tensorflow-lite-support:+'
+        implementation 'com.google.code.gson:gson:2.8.6'
     }
 }
