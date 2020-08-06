@@ -720,6 +720,10 @@ public class TflitePlugin implements MethodCallHandler {
   void detectObjectOnImageGeneric(HashMap args, Result result) throws IOException {
     String path = args.get("path").toString();
     int inputImageSize = (int) (args.get("inputImageSize"));
+    double mean = (double) (args.get("mean"));
+    double std = (double) (args.get("std"));
+    int rotations = (int) (args.get("rotations"));
+
     Bitmap bitmap = BitmapFactory.decodeFile(path);
     //Log.v("BITMAPDIMS", bitmap.getWidth() + "x" + bitmap.getHeight());
     args.put("originalImageWidth", bitmap.getHeight());
@@ -727,10 +731,10 @@ public class TflitePlugin implements MethodCallHandler {
 
     int cropSize = Math.min(bitmap.getWidth(), bitmap.getHeight());
     ImageProcessor imageProcessor = new ImageProcessor.Builder()
-            .add(new Rot90Op(1))
             .add(new ResizeWithCropOrPadOp(cropSize, cropSize))
             .add(new ResizeOp(inputImageSize, inputImageSize, ResizeMethod.BILINEAR))
-            .add(new NormalizeOp(0f, 1f))
+            .add(new Rot90Op(rotations))
+            .add(new NormalizeOp((float)mean, (float)std))
             .build();
     TensorImage tImage = new TensorImage(DataType.FLOAT32);
 

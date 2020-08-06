@@ -105,6 +105,9 @@ class Tflite {
     @required int inputImageSize,
     double scoreThreshold=.7,
     double overlapThreshold=.45,
+    double mean=127.5,
+    double std=127.5,
+    int rotations=0
   }) async {
     return await _channel.invokeMethod(
       'detectObjectOnImageGeneric',
@@ -114,6 +117,9 @@ class Tflite {
         "inputImageSize": inputImageSize,
         "scoreThreshold": scoreThreshold,
         "overlapThreshold": overlapThreshold,
+        "mean": mean,
+        "std": std,
+        "rotations": rotations
       },
     );
   }
