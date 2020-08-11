@@ -726,46 +726,6 @@ public class TflitePlugin implements MethodCallHandler {
       result.success(results);
     }
   }
-
-  private class DivideOp implements TensorOperator {
-    private final float factor;
-    
-    public DivideOp(float factor) {
-      this.factor = factor;
-    }
-
-    @Override
-    public TensorBuffer apply(TensorBuffer input) {
-      float[] values = input.getFloatArray();
-      float[] lastThreeBefore = new float[3];
-      float[] lastThreeAfter = new float[3];
-      //Log.v("TFPLUGIN", "values: " + Arrays.toString(values));
-      for (int i = 0; i < values.length; i++) {
-        float before = values[i];
-        float after = values[i] / this.factor;
-        lastThreeBefore[i%3] = before;
-        lastThreeAfter[i%3] = after;
-        // if (i % 3 == 0) {
-        //   Log.v("TFPLUGIN", "Converting " + Arrays.toString(lastThreeBefore) + " -> " + Arrays.toString(lastThreeAfter));
-        // }
-        values[i] = after;
-      }
-      //Log.v("TFPLUGIN", "" + values.length);
-
-      TensorBuffer output;
-      int[] shape = input.getShape();
-      //Log.v("TFPLUGIN", "shape: " + Arrays.toString(shape));
-      if (input.isDynamic()) {
-        output = TensorBufferFloat.createDynamic(DataType.FLOAT32);
-      } else {
-        output = TensorBufferFloat.createFixedSize(shape, DataType.FLOAT32);
-      }
-      //Log.v("TFPLUGIN", "values: " + Arrays.toString(values));
-      output.loadArray(values, shape);
-      return output;
-    }
-  }
-
   
   void detectObjectOnImageGeneric(HashMap args, Result result) throws IOException {
     String path = args.get("path").toString();
@@ -779,150 +739,26 @@ public class TflitePlugin implements MethodCallHandler {
     args.put("originalImageWidth", bitmap.getHeight());
     args.put("originalImageHeight", bitmap.getWidth());
 
-
-    // OLD - manually converting pixel by pixel
-    //
-    // int padSize = Math.max(bitmap.getWidth(), bitmap.getHeight())+1;
-    // ImageProcessor imageProcessor = new ImageProcessor.Builder()
-    //         .add(new ResizeWithCropOrPadOp(padSize, padSize))
-    //         .add(new ResizeOp(inputImageSize, inputImageSize, ResizeMethod.BILINEAR))
-    //         .add(new Rot90Op(rotations))
-    //         .build();
-    // TensorImage tImage = new TensorImage(DataType.FLOAT32);
-
-    // tImage.load(bitmap);
-    // //Log.v("BEFORE", tImage.getWidth() + "x" + tImage.getHeight());
-    // tImage = imageProcessor.process(tImage);
-    // saveTensorImageToFile(tImage, "postop", inputImageSize);
-    // Bitmap altered = tImage.getBitmap();
-
-    // ByteBuffer imgData = ByteBuffer.allocate(1 * inputImageSize * inputImageSize * 3 * 4);
-    // imgData.order(ByteOrder.nativeOrder());
-    // int[] intValues = new int[inputImageSize * inputImageSize];
-    // altered.getPixels(intValues, 0, altered.getWidth(), 0, 0, altered.getWidth(), altered.getHeight());
-    // imgData.rewind();
-
-    // float IMAGE_MEAN = 127.5f;
-    // float IMAGE_STD = 127.5f;
-    // for (int i = 0; i < inputImageSize; i++) {
-    //   for (int j = 0; j < inputImageSize; j++) {
-    //     int pixelValue = intValues[i * inputImageSize + j];
-    //     imgData.putFloat((((pixelValue >> 16) & 0xFF) - IMAGE_MEAN) / IMAGE_STD);
-    //     imgData.putFloat((((pixelValue >> 8) & 0xFF) - IMAGE_MEAN) / IMAGE_STD);
-    //     imgData.putFloat(((pixelValue & 0xFF) - IMAGE_MEAN) / IMAGE_STD);
-    //   }
-    // }
-
-
     int padSize = Math.max(bitmap.getWidth(), bitmap.getHeight())+1;
     ImageProcessor imageProcessor = new ImageProcessor.Builder()
             .add(new ResizeWithCropOrPadOp(padSize, padSize))
             .add(new ResizeOp(inputImageSize, inputImageSize, ResizeMethod.BILINEAR))
             .add(new Rot90Op(rotations))
-            .add(new DivideOp((float)std))
+            .add(new NormalizeOp((float)mean, (float)std))
             .build();
     TensorImage tImage = new TensorImage(DataType.FLOAT32);
 
     tImage.load(bitmap);
     tImage = imageProcessor.process(tImage);
-    //saveTensorImageToFile(tImage, "input", inputImageSize);
 
-
-    // random other stuff
-    // ImageProcessor pro = new ImageProcessor.Builder()
-    //         .add(new ResizeWithCropOrPadOp(padSize, padSize))
-    //         .add(new ResizeOp(inputImageSize, inputImageSize, ResizeMethod.BILINEAR))
-    //         .add(new Rot90Op(rotations))
-    //         .add(new NormalizeOp((float)mean, (float)std))
-    //         .add(new CastOp(DataType.UINT8))
-    //         .build();
-    // TensorImage tI = new TensorImage(DataType.FLOAT32);
-    // tI.load(bitmap);
-    // tI = pro.process(tI);
-    // saveTensorImageToFile(tI, "processed", inputImageSize);
-
-    // TensorImage testImage = new TensorImage(DataType.FLOAT32);
-    // ImageProcessor processor = new ImageProcessor.Builder()
-    //     .add(new ResizeWithCropOrPadOp(padSize, padSize))
-    //     .build();
-    // testImage.load(bitmap);
-    // testImage = processor.process(testImage);
-    // saveTensorImageToFile(testImage, "processed", padSize);
-
-    // TensorImage testImage2 = new TensorImage(DataType.FLOAT32);
-    // ImageProcessor processor2 = new ImageProcessor.Builder()
-    //     .add(new ResizeWithCropOrPadOp(padSize, padSize))
-    //     .add(new Rot90Op(1))
-    //     .build();
-    // testImage2.load(bitmap);
-    // testImage2 = processor2.process(testImage2);
-    // saveTensorImageToFile(testImage2, "rotated", padSize);
-
-    //Object[] inputs = { imgData };
     Object[] inputs = { tImage.getBuffer() };
     new RunForMultipleInputs(args, result, inputs).executeTfliteTask();
   }
 
-  private Bitmap arrayFlotToBitmap(List<Float> floatArray,int width,int height){
-
-    byte alpha = (byte) 255 ;
-    
-    Bitmap bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888) ;
-    
-    ByteBuffer byteBuffer = ByteBuffer.allocate(width*height*4*3) ;
-    
-    float Maximum = Collections.max(floatArray);
-    float minmum = Collections.min(floatArray);
-    float delta = Maximum - minmum ;
-    
-    int i = 0 ;
-    for (float value : floatArray){
-      byte temValue = (byte) ((byte) ((((value-minmum)/delta)*255)));
-      byteBuffer.put(4*i, temValue) ;
-      byteBuffer.put(4*i+1, temValue) ;
-      byteBuffer.put(4*i+2, temValue) ;
-      byteBuffer.put(4*i+3, alpha) ;
-      i++ ;
-    }
-    bmp.copyPixelsFromBuffer(byteBuffer) ;
-    return bmp ;
-  }
 
   private void saveTensorImageToFile(TensorImage tImage, String name, int imageSize) {
 
-    // WORKS but images are weird?
-    // Bitmap outBm = Bitmap.createBitmap(imageSize, imageSize, Bitmap.Config.ARGB_8888);
-    // ByteBuffer buf = tImage.getBuffer();
-    // buf.rewind();
-    // outBm.copyPixelsFromBuffer(buf);
-
     Bitmap outBm = tImage.getBitmap();
-
-    // TensorBuffer tb = tImage.getTensorBuffer();
-    // //Log.v("TFPLUGIN", "Size: " + farr.length);
-    // Bitmap outBm = Bitmap.createBitmap(imageSize, imageSize, Bitmap.Config.ARGB_8888);
-    // for (int i = 0; i < imageSize; i++) {
-    //   for (int j = 0; j < imageSize; j++) {
-    //     float val = tb.getFloatValue(i*4+j);
-    //     outBm.setPixel(i, j, color);
-    //   }
-    // }
-
-    //prepare bitmap
-    // FloatBuffer bb = tImage.getBuffer();
-    // Log.v("TFPLUGIN", "Size: " + bb.capacity());
-    // FloatBuffer fb = bb.asFloatBuffer();
-    // Log.v("TFPLUGIN", "Size: " + fb.capacity());
-    // float[] farr = new float[fb.limit()];
-    // fb.get(farr);
-    // List<Float> arr = new ArrayList<Float>();
-    // for (int i = 0; i < farr.length; i++) {
-    //   arr.add(farr[i]);
-    // }
-    // Log.v("TFPLUGIN", "Size: " + arr.size());
-    // Bitmap outBm = arrayFlotToBitmap(arr, imageSize, imageSize);
-    
-
     // we have bitmap prepared, write to file
     Date todayDate = Calendar.getInstance().getTime();
     SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd-hh-mm-ss");
@@ -936,19 +772,6 @@ public class TflitePlugin implements MethodCallHandler {
     } catch (IOException e) {
       e.printStackTrace();
     }
-  }
-
-  private void applyOpsAndSave(Bitmap bitmap, String name, int imageSize, List<Operator> ops) {
-
-    TensorImage tImage = new TensorImage(DataType.FLOAT32);
-    Builder builder = new ImageProcessor.Builder();
-    for (int i=0; i < ops.size(); i++) {
-      builder.add(ops.get(i));
-    }
-    ImageProcessor processor = builder.build();
-    tImage.load(bitmap);
-    tImage = processor.process(tImage);
-    saveTensorImageToFile(tImage, name, imageSize);
   }
 
   private class RunForMultipleInputs extends TfliteTask {
