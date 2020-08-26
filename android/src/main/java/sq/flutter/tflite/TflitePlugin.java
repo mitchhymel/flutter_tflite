@@ -928,7 +928,7 @@ public class TflitePlugin implements MethodCallHandler {
       double xMaxInter = Math.min(this.xMax, other.xMax);
       double yMinInter = Math.max(this.yMin, other.yMin);
       double yMaxInter = Math.min(this.yMax, other.yMax);
-      double interArea = Math.max(0, (xMaxInter - xMinInter) * (yMaxInter - yMinInter));
+      double interArea = Math.max(0, (xMaxInter - xMinInter)) * Math.max(0, (yMaxInter - yMinInter));
       double unionArea = this.area() + other.area() - interArea;
       double iou = interArea / unionArea;
       return iou;
