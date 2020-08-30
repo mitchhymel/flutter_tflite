@@ -875,7 +875,7 @@ public class TflitePlugin implements MethodCallHandler {
           guess.confidence = block.confidence;
           guess.probability = highestProbability;
           guess.score = guess.confidence * guess.probability;
-          Log.v("GUESS", valid + ", " + labels.get(highestIndex) + ", "  + guess.toString());
+          //Log.v("GUESS", valid + ", " + labels.get(highestIndex) + ", "  + guess.toString());
 
           if (valid) {
             unraveled.add(guess);
