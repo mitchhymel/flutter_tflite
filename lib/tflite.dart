@@ -99,16 +99,15 @@ class Tflite {
     9.77052,
     9.16828
   ];
-  
-  static Future<List> detectObjectOnImageGeneric({
-    @required String path,
-    @required int inputImageSize,
-    double scoreThreshold=.7,
-    double overlapThreshold=.45,
-    double mean=127.5,
-    double std=127.5,
-    int rotations=0
-  }) async {
+
+  static Future<List> detectObjectOnImageGeneric(
+      {@required String path,
+      @required int inputImageSize,
+      double scoreThreshold = .7,
+      double overlapThreshold = .45,
+      double mean = 127.5,
+      double std = 127.5,
+      int rotations = 0}) async {
     return await _channel.invokeMethod(
       'detectObjectOnImageGeneric',
       {
@@ -120,6 +119,33 @@ class Tflite {
         "mean": mean,
         "std": std,
         "rotations": rotations
+      },
+    );
+  }
+
+  static Future<List> detectObjectOnFrameGeneric(
+      {@required List<Uint8List> bytesList,
+      @required int inputImageSize,
+      @required int imageHeight,
+      @required int imageWidth,
+      double scoreThreshold = .7,
+      double overlapThreshold = .45,
+      double mean = 127.5,
+      double std = 127.5,
+      int rotations = 0}) async {
+    return await _channel.invokeMethod(
+      'detectObjectOnFrameGeneric',
+      {
+        "bytesList": bytesList,
+        "asynch": true,
+        "inputImageSize": inputImageSize,
+        "scoreThreshold": scoreThreshold,
+        "overlapThreshold": overlapThreshold,
+        "mean": mean,
+        "std": std,
+        "rotations": rotations,
+        "imageHeight": imageHeight,
+        "imageWidth": imageWidth,
       },
     );
   }

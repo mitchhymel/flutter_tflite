@@ -153,6 +153,12 @@ public class TflitePlugin implements MethodCallHandler {
       } catch (Exception e) {
         result.error("Failed to run model", e.getMessage(), e);
       }
+    } else if (call.method.equals("detectObjectOnFrameGeneric")) {
+      try {
+        detectObjectOnFrameGeneric((HashMap) call.arguments, result);
+      } catch (Exception e) {
+        result.error("Failed to run model", e.getMessage(), e);
+      }
     } else if (call.method.equals("detectObjectOnBinary")) {
       try {
         detectObjectOnBinary((HashMap) call.arguments, result);
@@ -726,16 +732,13 @@ public class TflitePlugin implements MethodCallHandler {
       result.success(results);
     }
   }
-  
-  void detectObjectOnImageGeneric(HashMap args, Result result) throws IOException {
-    String path = args.get("path").toString();
+
+  void detectObjectGeneric(HashMap args, Result result, Bitmap bitmap) throws IOException {
     int inputImageSize = (int) (args.get("inputImageSize"));
     double mean = (double) (args.get("mean"));
     double std = (double) (args.get("std"));
     int rotations = (int) (args.get("rotations"));
 
-    Bitmap bitmap = BitmapFactory.decodeFile(path);
-    //Log.v("BITMAPDIMS", bitmap.getWidth() + "x" + bitmap.getHeight());
     args.put("originalImageWidth", bitmap.getHeight());
     args.put("originalImageHeight", bitmap.getWidth());
 
@@ -755,6 +758,49 @@ public class TflitePlugin implements MethodCallHandler {
     new RunForMultipleInputs(args, result, inputs).executeTfliteTask();
   }
 
+  void detectObjectOnFrameGeneric(HashMap args, Result result) throws IOException {
+    List<byte[]> bytesList = (List<byte[]>) (args.get("bytesList"));
+    int imageWidth = (int) (args.get("imageWidth"));
+    int imageHeight = (int) (args.get("imageHeight"));
+    int rotation = (int) (args.get("rotations"));
+
+    //Log.v("TFPLUGIN", "" + bytes.length);
+    ByteBuffer Y = ByteBuffer.wrap(bytesList.get(0));
+    ByteBuffer U = ByteBuffer.wrap(bytesList.get(1));
+    ByteBuffer V = ByteBuffer.wrap(bytesList.get(2));
+
+    int Yb = Y.remaining();
+    int Ub = U.remaining();
+    int Vb = V.remaining();
+
+    byte[] data = new byte[Yb + Ub + Vb];
+
+    Y.get(data, 0, Yb);
+    V.get(data, Yb, Vb);
+    U.get(data, Yb + Vb, Ub);
+
+    Bitmap bitmapRaw = Bitmap.createBitmap(imageWidth, imageHeight, Bitmap.Config.ARGB_8888);
+    Allocation bmData = renderScriptNV21ToRGBA888(
+        mRegistrar.context(),
+        imageWidth,
+        imageHeight,
+        data);
+    bmData.copyTo(bitmapRaw);
+
+    Matrix matrix = new Matrix();
+    matrix.postRotate(rotation);
+    Bitmap bitmap = Bitmap.createBitmap(bitmapRaw, 0, 0, bitmapRaw.getWidth(), bitmapRaw.getHeight(), matrix, true);
+
+
+    //Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+    detectObjectGeneric(args, result, bitmap);
+  }
+  
+  void detectObjectOnImageGeneric(HashMap args, Result result) throws IOException {
+    String path = args.get("path").toString();
+    Bitmap bitmap = BitmapFactory.decodeFile(path);
+    detectObjectGeneric(args, result, bitmap);
+  }
 
   private void saveTensorImageToFile(TensorImage tImage, String name, int imageSize) {
 
