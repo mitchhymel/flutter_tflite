@@ -41,6 +41,7 @@ import org.tensorflow.lite.support.common.ops.QuantizeOp;
 import org.tensorflow.lite.support.common.ops.CastOp;
 import org.tensorflow.lite.support.image.ImageProcessor.Builder;
 import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 
 
 import org.tensorflow.lite.gpu.GpuDelegate;
@@ -852,7 +853,7 @@ public class TflitePlugin implements MethodCallHandler {
     protected void runTflite() {
       this.output = new HashMap<Integer, Object>();
       this.outputAsBuff = new HashMap<Integer, Object>();
-      Log.v("OUTPUT COUNT", "" + tfLite.getOutputTensorCount());
+      //Log.v("OUTPUT COUNT", "" + tfLite.getOutputTensorCount());
       for (int i = 0; i < tfLite.getOutputTensorCount(); i++) {
         Tensor t = tfLite.getOutputTensor(i);
         this.output.put(i, Array.newInstance(float.class, t.shape()));
@@ -991,7 +992,10 @@ public class TflitePlugin implements MethodCallHandler {
 
     @Override
     public String toString() {
-      return new Gson().toJson(this);
+      GsonBuilder gsonBuilder = new GsonBuilder();
+      gsonBuilder.setFieldNamingPolicy(FieldNamingPolicy.IDENTIY);
+      Gson gson = gsonBuilder.create();
+      return gson.toJson(this);
     }
 
     /**
