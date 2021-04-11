@@ -992,10 +992,7 @@ public class TflitePlugin implements MethodCallHandler {
 
     @Override
     public String toString() {
-      GsonBuilder gsonBuilder = new GsonBuilder();
-      gsonBuilder.setFieldNamingPolicy(FieldNamingPolicy.IDENTIY);
-      Gson gson = gsonBuilder.create();
-      return gson.toJson(this);
+      return new Gson().toJson(this);
     }
 
     /**
