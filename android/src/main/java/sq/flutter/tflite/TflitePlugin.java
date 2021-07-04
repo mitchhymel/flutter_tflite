@@ -756,6 +756,7 @@ public class TflitePlugin implements MethodCallHandler {
     tImage = imageProcessor.process(tImage);
 
     Object[] inputs = { tImage.getBuffer() };
+    //saveTensorImageToFile(tImage, "test", inputImageSize);
     new RunForMultipleInputs(args, result, inputs).executeTfliteTask();
   }
 
@@ -833,6 +834,7 @@ public class TflitePlugin implements MethodCallHandler {
     double std;
     double mean;
     Map<Integer, Object> outputAsBuff;
+    boolean logExtra;
 
     RunForMultipleInputs(
       HashMap args,
@@ -848,12 +850,19 @@ public class TflitePlugin implements MethodCallHandler {
       this.originalImageHeight = (int) (args.get("originalImageHeight"));
       this.std = (double) (args.get("std"));
       this.mean = (double) (args.get("mean"));
+      this.logExtra = (boolean) (args.get("logExtra"));
+    }
+
+
+    void log(String message) {
+      if (this.logExtra) {
+        Log.v("CustomTfLite", message);
+      }
     }
 
     protected void runTflite() {
       this.output = new HashMap<Integer, Object>();
       this.outputAsBuff = new HashMap<Integer, Object>();
-      //Log.v("OUTPUT COUNT", "" + tfLite.getOutputTensorCount());
       for (int i = 0; i < tfLite.getOutputTensorCount(); i++) {
         Tensor t = tfLite.getOutputTensor(i);
         this.output.put(i, Array.newInstance(float.class, t.shape()));
@@ -876,6 +885,9 @@ public class TflitePlugin implements MethodCallHandler {
     }
 
     private List<ProcessedGuess> unravelResults() {
+//      // can't log output since it is too much data to allocate
+//      String outputStr = new Gson().toJson(output);
+//      log("Output: " + outputStr);
       List<ProcessedGuess> unraveled = new ArrayList();
       for (int tensorOutputIndex = 0; tensorOutputIndex < tfLite.getOutputTensorCount(); tensorOutputIndex++) {
       Object[] imageResultsList = (Object[])output.get(tensorOutputIndex);
@@ -887,11 +899,8 @@ public class TflitePlugin implements MethodCallHandler {
       Object[] passes = (Object[])yDimensionResultsList[y];
       for (int pass = 0; pass < passes.length; pass++) {
         BlockGuess block = new BlockGuess(passes[pass]);
-        int highestIndex = block.getIndexOfHighestScore();
-        double highestProbability = block.probs[highestIndex];
-        double highestScore = block.confidence * highestProbability;
-        //Log.v("BLOCK", block.toString());
-        if (highestScore > this.scoreThreshold) {
+        log("BLOCK " + block.toString());
+        if (block.highestScore > this.scoreThreshold) {
           double xMin = block.xPos - .5*block.width;
           double xMax = block.xPos + .5*block.width;
           double yMin = block.yPos - .5*block.height;
@@ -918,15 +927,18 @@ public class TflitePlugin implements MethodCallHandler {
           guess.xMax = xMax;
           guess.yMin = yMin;
           guess.yMax = yMax;
-          guess.label = highestIndex;
+          guess.label = block.highestIndex;
           guess.confidence = block.confidence;
-          guess.probability = highestProbability;
+          guess.probability = block.probs[block.highestIndex];
           guess.score = guess.confidence * guess.probability;
-          //Log.v("GUESS", valid + ", " + labels.get(highestIndex) + ", "  + guess.toString());
+          log("GUESS: " + valid + ", " + labels.get(block.highestIndex) + ", "  + guess.toString());
 
           if (valid) {
             unraveled.add(guess);
           }
+        }
+        else {
+          log("Block doesn't meet score threshold");
         }
       }}}}}
       return unraveled;
@@ -1016,6 +1028,7 @@ public class TflitePlugin implements MethodCallHandler {
     public double confidence;
     public double[] probs;
     public int highestIndex;
+    public double highestScore;
 
     BlockGuess(Object obj) {
       float[] res = (float[]) obj;
@@ -1033,12 +1046,9 @@ public class TflitePlugin implements MethodCallHandler {
         if (this.probs[i] > highest) {
           highestIndex = i;
           highest = this.probs[i];
+          highestScore = highest * confidence;
         }
       }
-    }
-
-    public int getIndexOfHighestScore() {
-      return this.highestIndex;
     }
 
     @Override
